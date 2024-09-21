@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_json_schema import JsonSchema, JsonValidationError
-from pymongo import MongoClient
+from pymongo import MongoClient, errors
 from bson import ObjectId
 from dotenv import load_dotenv
 import os
@@ -15,6 +15,7 @@ schema = JsonSchema(app)
 client = MongoClient(os.getenv('MONGO_URI'))
 db = client[os.getenv('DB_NAME')]
 user_collection = db[os.getenv('COLLECTION_NAME')]
+
 
 def check_authorization():
     auth = request.authorization
@@ -37,6 +38,12 @@ def update_user():
         if not auth_valid:
             return jsonify({"Status": "failure", "reason": auth_msg}), 401
 
+        if not db.name in client.list_database_names():
+            return jsonify({"Status": "failure", "reason": "Database not found"}), 404
+
+        if not user_collection.name in db.list_collection_names():
+            return jsonify({"Status": "failure", "reason": "Collection not found"}), 404
+        
         data = request.get_json()
         user_id = ObjectId(data[User.USER_ID])
         user_in_db = user_collection.find_one({"_id": user_id})
