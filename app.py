@@ -1,22 +1,20 @@
 from flask import Flask, request, jsonify
+from flask_json_schema import JsonSchema, JsonValidationError
 from pymongo import MongoClient
 from bson import ObjectId
 from dotenv import load_dotenv
 import os
 from models import User
-import datetime
-import json
-
+from schemas import user_update_schema  # Import the schema
 
 load_dotenv('.env.development')
 
 app = Flask(__name__)
-
+schema = JsonSchema(app)
 
 client = MongoClient(os.getenv('MONGO_URI'))
 db = client[os.getenv('DB_NAME')]
 user_collection = db[os.getenv('COLLECTION_NAME')]
-
 
 def check_authorization():
     auth = request.authorization
@@ -27,38 +25,33 @@ def check_authorization():
         return False, "Invalid Authorization Token"
     return True, "Authorized"
 
+@app.errorhandler(JsonValidationError)
+def validation_error(e):
+    return jsonify({'Status': 'failure', 'reason': e.message}), 400
 
 @app.route('/user', methods=['PUT'])
+@schema.validate(user_update_schema)  # Use the imported schema
 def update_user():
-    
     try:
-        
         auth_valid, auth_msg = check_authorization()
         if not auth_valid:
             return jsonify({"Status": "failure", "reason": auth_msg}), 401
 
         data = request.get_json()
-
-        is_valid, validation_msg = User.validate_request(data)
-        if not is_valid:
-            return jsonify({"Status": "failure", "reason": validation_msg}), 400
-
-        
         user_id = ObjectId(data[User.USER_ID])
         user_in_db = user_collection.find_one({"_id": user_id})
 
+        if not user_in_db:
+            return jsonify({"Status": "failure", "reason": "User not found"}), 404
+        
         session_token = request.headers.get('Session-Token')
         if user_in_db['session_token'] != session_token:
             return jsonify({"Status": "failure", "reason": "Invalid session token"}), 498
 
-        if not user_in_db:
-            return jsonify({"Status": "failure", "reason": "User not found"}), 404
 
-        
         user = User(data)
         update_data = user.to_update_dict()
 
-        
         user_collection.update_one({"_id": user_id}, {"$set": update_data})
 
         return jsonify({"Status": "success", "reason": "User updated successfully"}), 200
@@ -67,5 +60,4 @@ def update_user():
         return jsonify({"Status": "failure", "reason": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(port=8000,debug=True)
-
+    app.run(port=8000, debug=True)
